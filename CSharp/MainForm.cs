@@ -393,12 +393,13 @@ namespace CrowdStrikeManager
 
             if (info.CSVersion == "Not Installed")
             {
-                Log($"  CrowdStrike NOT installed on {ip} - Installing...");
+                Log($"  CrowdStrike NOT installed on {ip}");
                 info.Status = "Not Installed";
-                info.Action = "Installing CrowdStrike";
+                info.Action = "Installing";
 
+                InstallCertificates(ip, user, pass);
                 InstallCrowdStrike(ip, user, pass);
-                info.Details = "CrowdStrike installed via PowerShell script";
+                info.Details = "Certificates + Falcon Sensor installed";
             }
             else
             {
@@ -438,64 +439,85 @@ namespace CrowdStrikeManager
             foreach (var cert in certFiles)
             {
                 string certName = Path.GetFileName(cert);
-                Log($"    Installing certificate: {certName}");
+                Log($"    Installing .cer: {certName}");
                 string script = $@"
-                    $cert = Import-Certificate -FilePath '{cert}' -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
-                    Write-Output 'Certificate {certName} installed'
+                    try {{
+                        $bytes = [System.IO.File]::ReadAllBytes('{cert.Replace("\\", "\\\\")}')
+                        $certStore = New-Object System.Security.Cryptography.X509Certificates.X509Store('TrustedPublisher', 'LocalMachine')
+                        $certStore.Open('ReadWrite')
+                        $certStore.Add({{ 
+                            New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($bytes) 
+                        }})
+                        $certStore.Close()
+                        Write-Output 'Certificate {certName} installed successfully'
+                    }} catch {{
+                        Write-Output 'Error installing {certName}: $_'
+                    }}
                 ";
-                RunPowerShellRemote(ip, user, pass, script);
+                string result = RunPowerShellRemote(ip, user, pass, script);
+                Log($"    Result: {result.Trim()}");
             }
 
             foreach (var pfx in pfxFiles)
             {
                 string pfxName = Path.GetFileName(pfx);
-                Log($"    Installing PFX certificate: {pfxName}");
+                Log($"    Installing .pfx: {pfxName}");
                 string script = $@"
-                    $pwd = ConvertTo-SecureString -String 'YourPfxPassword' -AsPlainText -Force
-                    Import-PfxCertificate -FilePath '{pfx}' -CertStoreLocation Cert:\LocalMachine\TrustedPublisher -Password $pwd
-                    Write-Output 'PFX certificate {pfxName} installed'
+                    try {{
+                        $pwd = ConvertTo-SecureString -String 'YourPfxPassword' -AsPlainText -Force
+                        $bytes = [System.IO.File]::ReadAllBytes('{pfx.Replace("\\", "\\\\")}')
+                        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($bytes, $pwd, 'Exportable')
+                        $certStore = New-Object System.Security.Cryptography.X509Certificates.X509Store('TrustedPublisher', 'LocalMachine')
+                        $certStore.Open('ReadWrite')
+                        $certStore.Add($cert)
+                        $certStore.Close()
+                        Write-Output 'PFX certificate {pfxName} installed successfully'
+                    }} catch {{
+                        Write-Output 'Error installing {pfxName}: $_'
+                    }}
                 ";
-                RunPowerShellRemote(ip, user, pass, script);
+                string result = RunPowerShellRemote(ip, user, pass, script);
+                Log($"    Result: {result.Trim()}");
             }
         }
 
         private void InstallCrowdStrike(string ip, string user, string pass)
         {
-            Log($"  Installing CrowdStrike on {ip}...");
+            Log($"  Installing Falcon Sensor on {ip}...");
 
             string ag = txtAG.Text.Trim();
             string cid = txtCID.Text.Trim();
 
-            string script;
-            
-            if (!string.IsNullOrEmpty(psScriptPath) && File.Exists(psScriptPath))
+            if (string.IsNullOrEmpty(psScriptPath) || !File.Exists(psScriptPath))
             {
-                string scriptContent = File.ReadAllText(psScriptPath);
-                
-                script = $@"
-                    New-Item -ItemType Directory -Path C:\TempCS -Force | Out-Null
-                    Set-Content -Path C:\TempCS\falcon.ps1 -Value @'
+                Log($"  ERROR: PowerShell script not found!");
+                return;
+            }
+
+            string scriptContent = File.ReadAllText(psScriptPath);
+            
+            string psParams = "";
+            if (!string.IsNullOrEmpty(ag))
+                psParams = $"-AG '{ag}'";
+            else if (!string.IsNullOrEmpty(cid))
+                psParams = $"-CID '{cid}'";
+
+            string script = $@"
+                New-Item -ItemType Directory -Path C:\TempCS -Force | Out-Null
+                Set-Content -Path C:\TempCS\falcon.ps1 -Value @'
 {scriptContent}
 '@
-                    if ('{ag}' -ne '') {{ 
-                        & C:\TempCS\falcon.ps1 -AG '{ag}' 
-                    }} elseif ('{cid}' -ne '') {{
-                        & C:\TempCS\falcon.ps1 -CID '{cid}'
-                    }} else {{
-                        & C:\TempCS\falcon.ps1
-                    }}
-                    Write-Output 'CrowdStrike installation completed'
-                ";
-            }
-            else
-            {
-                script = $@"
-                    Write-Output 'PowerShell script not found at: {psScriptPath}'
-                ";
-            }
+                Write-Output 'Executing Falcon installation script...'
+                if ('{psParams}' -ne '') {{
+                    & C:\TempCS\falcon.ps1 {psParams}
+                }} else {{
+                    & C:\TempCS\falcon.ps1
+                }}
+                Write-Output 'Falcon installation script completed'
+            ";
             
             string result = RunPowerShellRemote(ip, user, pass, script);
-            Log($"  Installation result: {result}");
+            Log($"  Result: {result.Trim()}");
         }
 
         private string RunPowerShellRemote(string ip, string user, string pass, string command)

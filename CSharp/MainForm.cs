@@ -487,33 +487,65 @@ namespace CrowdStrikeManager
             string ag = txtAG.Text.Trim();
             string cid = txtCID.Text.Trim();
 
-            if (string.IsNullOrEmpty(psScriptPath) || !File.Exists(psScriptPath))
+            string[] exeFiles = Directory.GetFiles(csFolder, "*.exe");
+            string falconExe = null;
+            
+            foreach (var exe in exeFiles)
             {
-                Log($"  ERROR: PowerShell script not found!");
+                string exeName = Path.GetFileName(exe).ToLower();
+                if (exeName.Contains("sensor") || exeName.Contains("falcon") || exeName.Contains("windows"))
+                {
+                    falconExe = exe;
+                    break;
+                }
+            }
+
+            if (falconExe == null && exeFiles.Length > 0)
+            {
+                falconExe = exeFiles[0];
+            }
+
+            if (falconExe == null)
+            {
+                Log($"  ERROR: Falcon sensor EXE not found in CS folder!");
                 return;
             }
 
-            string scriptContent = File.ReadAllText(psScriptPath);
-            
-            string psParams = "";
-            if (!string.IsNullOrEmpty(ag))
-                psParams = $"-AG '{ag}'";
-            else if (!string.IsNullOrEmpty(cid))
-                psParams = $"-CID '{cid}'";
+            string falconExeName = Path.GetFileName(falconExe);
+            Log($"  Found Falcon EXE: {falconExeName}");
 
-            string script = $@"
-                New-Item -ItemType Directory -Path C:\TempCS -Force | Out-Null
-                Set-Content -Path C:\TempCS\falcon.ps1 -Value @'
+            string script;
+            
+            if (!string.IsNullOrEmpty(psScriptPath) && File.Exists(psScriptPath))
+            {
+                string scriptContent = File.ReadAllText(psScriptPath);
+                
+                script = $@"
+                    New-Item -ItemType Directory -Path C:\TempCS -Force | Out-Null
+                    Set-Content -Path C:\TempCS\falcon.ps1 -Value @'
 {scriptContent}
 '@
-                Write-Output 'Executing Falcon installation script...'
-                if ('{psParams}' -ne '') {{
-                    & C:\TempCS\falcon.ps1 {psParams}
-                }} else {{
+                    Write-Output 'Executing Falcon installation...'
                     & C:\TempCS\falcon.ps1
-                }}
-                Write-Output 'Falcon installation script completed'
-            ";
+                ";
+            }
+            else
+            {
+                string psParams = "";
+                if (!string.IsNullOrEmpty(ag))
+                    psParams = $"/install /quiet AG='{ag}'";
+                else if (!string.IsNullOrEmpty(cid))
+                    psParams = $"/install /quiet CID='{cid}'";
+                else
+                    psParams = "/install /quiet";
+
+                script = $@"
+                    New-Item -ItemType Directory -Path C:\TempCS -Force | Out-Null
+                    Write-Output 'Installing Falcon sensor with params: {psParams}'
+                    Start-Process 'C:\TempCS\{falconExeName}' -ArgumentList '{psParams}' -Wait
+                    Write-Output 'Falcon installation completed'
+                ";
+            }
             
             string result = RunPowerShellRemote(ip, user, pass, script);
             Log($"  Result: {result.Trim()}");

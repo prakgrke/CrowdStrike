@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>CrowdStrikeManager</AssemblyName>
+    <AssemblyTitle>CrowdStrike Manager</AssemblyTitle>
+    <Version>1.0.0</Version>
+    <StartupObject>CrowdStrikeManager.MainForm</StartupObject>
+  </PropertyGroup>
+
+</Project>

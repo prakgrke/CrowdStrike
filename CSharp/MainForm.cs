@@ -378,6 +378,13 @@ namespace CrowdStrikeManager
                 Get-HotFix | Select-Object HotFixID, InstalledOn | ConvertTo-Json -Compress
             ");
 
+            Log($"  Checking CrowdStrike Agent Group in registry...");
+            string agRegistry = RunPowerShellRemote(ip, user, pass, @"
+                $ag = Get-ItemProperty 'HKLM:\SOFTWARE\CrowdStrike\{9b9b93b8-79e0-11ed-82be-b9b31b4e1f7b}' -ErrorAction SilentlyContinue
+                if ($ag) { $ag.AG } else { 'Not Set' }
+            ");
+            info.AG = agRegistry.Trim();
+
             string targetVersion = txtTargetVersion.Text.Trim();
 
             if (info.CSVersion == "Not Installed")
@@ -388,7 +395,16 @@ namespace CrowdStrikeManager
 
                 InstallCertificates(ip, user, pass);
                 InstallCrowdStrike(ip, user, pass);
-                info.Details = "Certificates + Falcon Sensor installed";
+                
+                Log($"  Verifying AG in registry...");
+                string agAfter = RunPowerShellRemote(ip, user, pass, @"
+                    $ag = Get-ItemProperty 'HKLM:\SOFTWARE\CrowdStrike\{9b9b93b8-79e0-11ed-82be-b9b31b4e1f7b}' -ErrorAction SilentlyContinue
+                    if ($ag) { $ag.AG } else { 'Not Set' }
+                ");
+                info.AG = agAfter.Trim();
+                Log($"  AG in registry: {info.AG}");
+                
+                info.Details = $"AG: {info.AG} | Certificates + Falcon installed";
             }
             else if (!string.IsNullOrEmpty(targetVersion))
             {
@@ -402,14 +418,21 @@ namespace CrowdStrikeManager
 
                     InstallCertificates(ip, user, pass);
                     InstallCrowdStrike(ip, user, pass);
-                    info.Details = $"Updated from {info.CSVersion} to {targetVersion}";
+                    
+                    string agAfter = RunPowerShellRemote(ip, user, pass, @"
+                        $ag = Get-ItemProperty 'HKLM:\SOFTWARE\CrowdStrike\{9b9b93b8-79e0-11ed-82be-b9b31b4e1f7b}' -ErrorAction SilentlyContinue
+                        if ($ag) { $ag.AG } else { 'Not Set' }
+                    ");
+                    info.AG = agAfter.Trim();
+                    
+                    info.Details = $"AG: {info.AG} | Updated from {info.CSVersion} to {targetVersion}";
                 }
                 else
                 {
                     Log($"  CS Version is up to date: {info.CSVersion}");
                     info.Status = "Up to Date";
                     info.Action = "No Action";
-                    info.Details = $"Version matches target: {targetVersion}";
+                    info.Details = $"AG: {info.AG} | Version matches target: {targetVersion}";
                 }
             }
             else
@@ -417,7 +440,7 @@ namespace CrowdStrikeManager
                 Log($"  CS Version: {info.CSVersion} (No target version specified)");
                 info.Status = "Installed";
                 info.Action = "No Action";
-                info.Details = "Version check skipped - no target specified";
+                info.Details = $"AG: {info.AG} | Version check skipped";
             }
 
             string outputDir = @"C:\CS_Report_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -756,6 +779,7 @@ namespace CrowdStrikeManager
         public string IP { get; set; }
         public string Hostname { get; set; }
         public string CSVersion { get; set; }
+        public string AG { get; set; }
         public string Status { get; set; }
         public string Action { get; set; }
         public string Details { get; set; }

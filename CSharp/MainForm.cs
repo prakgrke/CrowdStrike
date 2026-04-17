@@ -412,13 +412,6 @@ namespace CrowdStrikeManager
                 info.Action = "No Action";
                 info.Details = "Version check skipped - no target specified";
             }
-            else
-            {
-                Log($"  Current CS Version: {info.CSVersion}");
-                info.Status = "Up to Date";
-                info.Action = "No Action Required";
-                info.Details = "Same version already installed";
-            }
 
             string outputDir = @"C:\CS_Report_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string machineReport = Path.Combine(outputDir, $"{ip}_report.txt");

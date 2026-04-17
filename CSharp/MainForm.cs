@@ -24,6 +24,7 @@ namespace CrowdStrikeManager
         private DataGridView dgvResults;
         private CheckBox chkShowAll;
         private TextBox txtTargetVersion;
+        private TextBox txtAG;
 
         private string csvPath = null;
         private string csFolder = null;
@@ -93,10 +94,16 @@ namespace CrowdStrikeManager
             Label lblTargetVersion = new Label { Text = "Target Version:", Location = new System.Drawing.Point(350, 195), Size = new System.Drawing.Size(100, 20) };
             this.Controls.Add(lblTargetVersion);
 
-            txtTargetVersion = new TextBox { Location = new System.Drawing.Point(455, 192), Size = new System.Drawing.Size(150, 22), PlaceholderText = "e.g., 6.45.15601" };
+            txtTargetVersion = new TextBox { Location = new System.Drawing.Point(455, 192), Size = new System.Drawing.Size(120, 22), PlaceholderText = "e.g., 6.45" };
             this.Controls.Add(txtTargetVersion);
 
-            chkShowAll = new CheckBox { Text = "Show All Machines", Location = new System.Drawing.Point(630, 195), Size = new System.Drawing.Size(150, 20), Checked = true };
+            Label lblAG = new Label { Text = "Agent Group:", Location = new System.Drawing.Point(590, 195), Size = new System.Drawing.Size(80, 20) };
+            this.Controls.Add(lblAG);
+
+            txtAG = new TextBox { Location = new System.Drawing.Point(675, 192), Size = new System.Drawing.Size(185, 22), PlaceholderText = "Agent Group Name" };
+            this.Controls.Add(txtAG);
+
+            chkShowAll = new CheckBox { Text = "Show All Machines", Location = new System.Drawing.Point(120, 225), Size = new System.Drawing.Size(150, 20), Checked = true };
             this.Controls.Add(chkShowAll);
 
             btnStart = new Button
@@ -542,8 +549,8 @@ namespace CrowdStrikeManager
 
             if (!string.IsNullOrEmpty(psScriptPath) && File.Exists(psScriptPath))
             {
-                Log($"  Copying {falconScriptName} to remote machine...");
                 string scriptContent = File.ReadAllText(psScriptPath);
+                string ag = txtAG.Text.Trim();
                 
                 string copyScript = $@"
                     Set-Content -Path 'C:\TempCS\{falconScriptName}' -Value @'
@@ -553,12 +560,26 @@ namespace CrowdStrikeManager
                 ";
                 RunPowerShellRemote(ip, user, pass, copyScript);
 
-                Log($"  Executing Falcon installation script...");
-                string execScript = $@"
-                    Write-Output 'Starting Falcon installation...'
-                    & C:\TempCS\{falconScriptName}
-                    Write-Output 'Falcon installation completed'
-                ";
+                Log($"  Executing Falcon installation script with AG: {ag}...");
+                string execScript;
+                
+                if (!string.IsNullOrEmpty(ag))
+                {
+                    execScript = $@"
+                        Write-Output 'Starting Falcon installation with AG: {ag}...'
+                        & C:\TempCS\{falconScriptName} -AG '{ag}'
+                        Write-Output 'Falcon installation completed'
+                    ";
+                }
+                else
+                {
+                    execScript = $@"
+                        Write-Output 'Starting Falcon installation...'
+                        & C:\TempCS\{falconScriptName}
+                        Write-Output 'Falcon installation completed'
+                    ";
+                }
+                
                 string result = RunPowerShellRemote(ip, user, pass, execScript);
                 Log($"  Result: {result.Trim()}");
             }

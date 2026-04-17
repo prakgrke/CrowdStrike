@@ -24,8 +24,6 @@ namespace CrowdStrikeManager
         private DataGridView dgvResults;
         private CheckBox chkShowAll;
         private TextBox txtDomain;
-        private TextBox txtAG;
-        private TextBox txtCID;
 
         private string csvPath = null;
         private string csFolder = null;
@@ -98,19 +96,7 @@ namespace CrowdStrikeManager
             cmbVersion = new ComboBox { Location = new System.Drawing.Point(120, 192), Size = new System.Drawing.Size(200, 22), DropDownStyle = ComboBoxStyle.DropDownList };
             this.Controls.Add(cmbVersion);
 
-            Label lblAG = new Label { Text = "Agent Group:", Location = new System.Drawing.Point(350, 195), Size = new System.Drawing.Size(80, 20) };
-            this.Controls.Add(lblAG);
-
-            txtAG = new TextBox { Location = new System.Drawing.Point(435, 192), Size = new System.Drawing.Size(150, 22), PlaceholderText = "Agent Group Name" };
-            this.Controls.Add(txtAG);
-
-            Label lblCID = new Label { Text = "CID:", Location = new System.Drawing.Point(610, 195), Size = new System.Drawing.Size(30, 20) };
-            this.Controls.Add(lblCID);
-
-            txtCID = new TextBox { Location = new System.Drawing.Point(645, 192), Size = new System.Drawing.Size(215, 22), PlaceholderText = "CrowdStrike CID" };
-            this.Controls.Add(txtCID);
-
-            chkShowAll = new CheckBox { Text = "Show All Machines", Location = new System.Drawing.Point(120, 225), Size = new System.Drawing.Size(150, 20), Checked = true };
+            chkShowAll = new CheckBox { Text = "Show All Machines", Location = new System.Drawing.Point(350, 195), Size = new System.Drawing.Size(150, 20), Checked = true };
             this.Controls.Add(chkShowAll);
 
             btnStart = new Button
@@ -439,10 +425,19 @@ namespace CrowdStrikeManager
             foreach (var cert in certFiles)
             {
                 string certName = Path.GetFileName(cert);
+                Log($"    Copying certificate: {certName}");
+                
+                string copyScript = $@"
+                    New-Item -ItemType Directory -Path C:\TempCS -Force | Out-Null
+                    Copy-Item -Path '{cert}' -Destination 'C:\TempCS\{certName}' -Force
+                    Write-Output 'Copied {certName}'
+                ";
+                RunPowerShellRemote(ip, user, pass, copyScript);
+
                 Log($"    Installing .cer: {certName}");
-                string script = $@"
+                string installScript = $@"
                     try {{
-                        $bytes = [System.IO.File]::ReadAllBytes('{cert.Replace("\\", "\\\\")}')
+                        $bytes = [System.IO.File]::ReadAllBytes('C:\TempCS\{certName}')
                         $certStore = New-Object System.Security.Cryptography.X509Certificates.X509Store('TrustedPublisher', 'LocalMachine')
                         $certStore.Open('ReadWrite')
                         $certStore.Add({{ 
@@ -454,17 +449,25 @@ namespace CrowdStrikeManager
                         Write-Output 'Error installing {certName}: $_'
                     }}
                 ";
-                string result = RunPowerShellRemote(ip, user, pass, script);
+                string result = RunPowerShellRemote(ip, user, pass, installScript);
                 Log($"    Result: {result.Trim()}");
             }
 
             foreach (var pfx in pfxFiles)
             {
                 string pfxName = Path.GetFileName(pfx);
+                Log($"    Copying PFX: {pfxName}");
+                
+                string copyScript = $@"
+                    Copy-Item -Path '{pfx}' -Destination 'C:\TempCS\{pfxName}' -Force
+                    Write-Output 'Copied {pfxName}'
+                ";
+                RunPowerShellRemote(ip, user, pass, copyScript);
+
                 Log($"    Installing .pfx: {pfxName}");
-                string script = $@"
+                string installScript = $@"
                     try {{
-                        $bytes = [System.IO.File]::ReadAllBytes('{pfx.Replace("\\", "\\\\")}')
+                        $bytes = [System.IO.File]::ReadAllBytes('C:\TempCS\{pfxName}')
                         $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($bytes)
                         $certStore = New-Object System.Security.Cryptography.X509Certificates.X509Store('TrustedPublisher', 'LocalMachine')
                         $certStore.Open('ReadWrite')
@@ -475,7 +478,7 @@ namespace CrowdStrikeManager
                         Write-Output 'Error installing {pfxName}: $_'
                     }}
                 ";
-                string result = RunPowerShellRemote(ip, user, pass, script);
+                string result = RunPowerShellRemote(ip, user, pass, installScript);
                 Log($"    Result: {result.Trim()}");
             }
         }
@@ -483,9 +486,6 @@ namespace CrowdStrikeManager
         private void InstallCrowdStrike(string ip, string user, string pass)
         {
             Log($"  Installing Falcon Sensor on {ip}...");
-
-            string ag = txtAG.Text.Trim();
-            string cid = txtCID.Text.Trim();
 
             string[] exeFiles = Directory.GetFiles(csFolder, "*.exe");
             string falconExe = null;
@@ -512,43 +512,49 @@ namespace CrowdStrikeManager
             }
 
             string falconExeName = Path.GetFileName(falconExe);
-            Log($"  Found Falcon EXE: {falconExeName}");
-
-            string script;
+            string falconScriptName = Path.GetFileName(psScriptPath);
             
+            Log($"  Copying {falconExeName} to remote machine...");
+            string copyExeScript = $@"
+                New-Item -ItemType Directory -Path C:\TempCS -Force | Out-Null
+                Copy-Item -Path '{falconExe}' -Destination 'C:\TempCS\{falconExeName}' -Force
+                Write-Output 'Copied {falconExeName}'
+            ";
+            RunPowerShellRemote(ip, user, pass, copyExeScript);
+
             if (!string.IsNullOrEmpty(psScriptPath) && File.Exists(psScriptPath))
             {
+                Log($"  Copying {falconScriptName} to remote machine...");
                 string scriptContent = File.ReadAllText(psScriptPath);
                 
-                script = $@"
-                    New-Item -ItemType Directory -Path C:\TempCS -Force | Out-Null
-                    Set-Content -Path C:\TempCS\falcon.ps1 -Value @'
+                string copyScript = $@"
+                    Set-Content -Path 'C:\TempCS\{falconScriptName}' -Value @'
 {scriptContent}
 '@
-                    Write-Output 'Executing Falcon installation...'
-                    & C:\TempCS\falcon.ps1
+                    Write-Output 'Copied {falconScriptName}'
                 ";
+                RunPowerShellRemote(ip, user, pass, copyScript);
+
+                Log($"  Executing Falcon installation script...");
+                string execScript = $@"
+                    Write-Output 'Starting Falcon installation...'
+                    & C:\TempCS\{falconScriptName}
+                    Write-Output 'Falcon installation completed'
+                ";
+                string result = RunPowerShellRemote(ip, user, pass, execScript);
+                Log($"  Result: {result.Trim()}");
             }
             else
             {
-                string psParams = "";
-                if (!string.IsNullOrEmpty(ag))
-                    psParams = $"/install /quiet AG='{ag}'";
-                else if (!string.IsNullOrEmpty(cid))
-                    psParams = $"/install /quiet CID='{cid}'";
-                else
-                    psParams = "/install /quiet";
-
-                script = $@"
-                    New-Item -ItemType Directory -Path C:\TempCS -Force | Out-Null
-                    Write-Output 'Installing Falcon sensor with params: {psParams}'
-                    Start-Process 'C:\TempCS\{falconExeName}' -ArgumentList '{psParams}' -Wait
+                Log($"  Executing Falcon EXE directly...");
+                string execScript = $@"
+                    Write-Output 'Installing Falcon sensor: C:\TempCS\{falconExeName}'
+                    Start-Process 'C:\TempCS\{falconExeName}' -ArgumentList '/install /quiet' -Wait
                     Write-Output 'Falcon installation completed'
                 ";
+                string result = RunPowerShellRemote(ip, user, pass, execScript);
+                Log($"  Result: {result.Trim()}");
             }
-            
-            string result = RunPowerShellRemote(ip, user, pass, script);
-            Log($"  Result: {result.Trim()}");
         }
 
         private string RunPowerShellRemote(string ip, string user, string pass, string command)

@@ -464,9 +464,8 @@ namespace CrowdStrikeManager
                 Log($"    Installing .pfx: {pfxName}");
                 string script = $@"
                     try {{
-                        $pwd = ConvertTo-SecureString -String 'YourPfxPassword' -AsPlainText -Force
                         $bytes = [System.IO.File]::ReadAllBytes('{pfx.Replace("\\", "\\\\")}')
-                        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($bytes, $pwd, 'Exportable')
+                        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($bytes)
                         $certStore = New-Object System.Security.Cryptography.X509Certificates.X509Store('TrustedPublisher', 'LocalMachine')
                         $certStore.Open('ReadWrite')
                         $certStore.Add($cert)

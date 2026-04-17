@@ -23,7 +23,7 @@ namespace CrowdStrikeManager
         private Label lblScriptPath;
         private DataGridView dgvResults;
         private CheckBox chkShowAll;
-        private TextBox txtDomain;
+        private TextBox txtTargetVersion;
 
         private string csvPath = null;
         private string csFolder = null;
@@ -54,13 +54,7 @@ namespace CrowdStrikeManager
             };
             this.Controls.Add(lblTitle);
 
-            Label lblDomain = new Label { Text = "Domain (optional):", Location = new System.Drawing.Point(20, 55), Size = new System.Drawing.Size(120, 20) };
-            this.Controls.Add(lblDomain);
-
-            txtDomain = new TextBox { Location = new System.Drawing.Point(145, 52), Size = new System.Drawing.Size(300, 22), PlaceholderText = "DOMAIN or leave empty" };
-            this.Controls.Add(txtDomain);
-
-            Label lblCsv = new Label { Text = "CSV File:", Location = new System.Drawing.Point(20, 90), Size = new System.Drawing.Size(100, 20) };
+            Label lblCsv = new Label { Text = "CSV File:", Location = new System.Drawing.Point(20, 55), Size = new System.Drawing.Size(100, 20) };
             this.Controls.Add(lblCsv);
 
             btnCSV = new Button { Text = "Select CSV", Location = new System.Drawing.Point(120, 87), Size = new System.Drawing.Size(100, 25) };
@@ -96,7 +90,13 @@ namespace CrowdStrikeManager
             cmbVersion = new ComboBox { Location = new System.Drawing.Point(120, 192), Size = new System.Drawing.Size(200, 22), DropDownStyle = ComboBoxStyle.DropDownList };
             this.Controls.Add(cmbVersion);
 
-            chkShowAll = new CheckBox { Text = "Show All Machines", Location = new System.Drawing.Point(350, 195), Size = new System.Drawing.Size(150, 20), Checked = true };
+            Label lblTargetVersion = new Label { Text = "Target Version:", Location = new System.Drawing.Point(350, 195), Size = new System.Drawing.Size(100, 20) };
+            this.Controls.Add(lblTargetVersion);
+
+            txtTargetVersion = new TextBox { Location = new System.Drawing.Point(455, 192), Size = new System.Drawing.Size(150, 22), PlaceholderText = "e.g., 6.45.15601" };
+            this.Controls.Add(txtTargetVersion);
+
+            chkShowAll = new CheckBox { Text = "Show All Machines", Location = new System.Drawing.Point(630, 195), Size = new System.Drawing.Size(150, 20), Checked = true };
             this.Controls.Add(chkShowAll);
 
             btnStart = new Button
@@ -288,12 +288,6 @@ namespace CrowdStrikeManager
                     string ip = parts[0].Trim();
                     string user = parts[1].Trim();
                     string pass = parts[2].Trim();
-                    string domain = txtDomain.Text.Trim();
-
-                    if (!string.IsNullOrEmpty(domain) && !user.Contains("\\"))
-                    {
-                        user = domain + "\\" + user;
-                    }
 
                     lblProgress.Text = $"Processing: {ip} ({i}/{lines.Length - 1})";
                     lblStatus.Text = $"Processing: {ip}";
@@ -377,15 +371,46 @@ namespace CrowdStrikeManager
                 Get-HotFix | Select-Object HotFixID, InstalledOn | ConvertTo-Json -Compress
             ");
 
+            string targetVersion = txtTargetVersion.Text.Trim();
+
             if (info.CSVersion == "Not Installed")
             {
-                Log($"  CrowdStrike NOT installed on {ip}");
+                Log($"  CrowdStrike NOT installed on {ip} - Installing...");
                 info.Status = "Not Installed";
                 info.Action = "Installing";
 
                 InstallCertificates(ip, user, pass);
                 InstallCrowdStrike(ip, user, pass);
                 info.Details = "Certificates + Falcon Sensor installed";
+            }
+            else if (!string.IsNullOrEmpty(targetVersion))
+            {
+                bool needsUpdate = CompareVersions(info.CSVersion, targetVersion);
+                
+                if (needsUpdate)
+                {
+                    Log($"  CS Version mismatch: Current={info.CSVersion}, Target={targetVersion} - Updating...");
+                    info.Status = "Version Mismatch";
+                    info.Action = "Updating";
+
+                    InstallCertificates(ip, user, pass);
+                    InstallCrowdStrike(ip, user, pass);
+                    info.Details = $"Updated from {info.CSVersion} to {targetVersion}";
+                }
+                else
+                {
+                    Log($"  CS Version is up to date: {info.CSVersion}");
+                    info.Status = "Up to Date";
+                    info.Action = "No Action";
+                    info.Details = $"Version matches target: {targetVersion}";
+                }
+            }
+            else
+            {
+                Log($"  CS Version: {info.CSVersion} (No target version specified)");
+                info.Status = "Installed";
+                info.Action = "No Action";
+                info.Details = "Version check skipped - no target specified";
             }
             else
             {
@@ -649,6 +674,33 @@ namespace CrowdStrikeManager
             {
                 txtLog.AppendText(DateTime.Now.ToString("HH:mm:ss") + " - " + message + Environment.NewLine);
             }));
+        }
+
+        private bool CompareVersions(string current, string target)
+        {
+            try
+            {
+                string[] currentParts = current.Split('.');
+                string[] targetParts = target.Split('.');
+
+                int maxLength = Math.Max(currentParts.Length, targetParts.Length);
+
+                for (int i = 0; i < maxLength; i++)
+                {
+                    int currentVal = i < currentParts.Length ? int.TryParse(currentParts[i], out int cv) ? cv : 0 : 0;
+                    int targetVal = i < targetParts.Length ? int.TryParse(targetParts[i], out int tv) ? tv : 0 : 0;
+
+                    if (currentVal < targetVal)
+                        return true;
+                    if (currentVal > targetVal)
+                        return false;
+                }
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         [STAThread]

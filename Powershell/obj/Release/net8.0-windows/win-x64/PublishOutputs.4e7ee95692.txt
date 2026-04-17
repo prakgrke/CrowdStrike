@@ -1,0 +1,7 @@
+C:\Apps\Powershell\publish\CrowdStrikeTool.pdb
+C:\Apps\Powershell\publish\D3DCompiler_47_cor3.dll
+C:\Apps\Powershell\publish\PenImc_cor3.dll
+C:\Apps\Powershell\publish\PresentationNative_cor3.dll
+C:\Apps\Powershell\publish\vcruntime140_cor3.dll
+C:\Apps\Powershell\publish\wpfgfx_cor3.dll
+C:\Apps\Powershell\publish\CrowdStrikeTool.exe

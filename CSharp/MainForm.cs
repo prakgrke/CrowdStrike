@@ -24,6 +24,8 @@ namespace CrowdStrikeManager
         private DataGridView dgvResults;
         private CheckBox chkShowAll;
         private TextBox txtDomain;
+        private TextBox txtAG;
+        private TextBox txtCID;
 
         private string csvPath = null;
         private string csFolder = null;
@@ -90,19 +92,31 @@ namespace CrowdStrikeManager
             lblScriptPath = new Label { Text = "", Location = new System.Drawing.Point(230, 160), Size = new System.Drawing.Size(600, 20), ForeColor = System.Drawing.Color.Gray };
             this.Controls.Add(lblScriptPath);
 
-            Label lblVersion = new Label { Text = "Target Version:", Location = new System.Drawing.Point(20, 195), Size = new System.Drawing.Size(100, 20) };
+            Label lblVersion = new Label { Text = "PS Script:", Location = new System.Drawing.Point(20, 195), Size = new System.Drawing.Size(100, 20) };
             this.Controls.Add(lblVersion);
 
             cmbVersion = new ComboBox { Location = new System.Drawing.Point(120, 192), Size = new System.Drawing.Size(200, 22), DropDownStyle = ComboBoxStyle.DropDownList };
             this.Controls.Add(cmbVersion);
 
-            chkShowAll = new CheckBox { Text = "Show All Machines", Location = new System.Drawing.Point(350, 195), Size = new System.Drawing.Size(150, 20), Checked = true };
+            Label lblAG = new Label { Text = "Agent Group:", Location = new System.Drawing.Point(350, 195), Size = new System.Drawing.Size(80, 20) };
+            this.Controls.Add(lblAG);
+
+            txtAG = new TextBox { Location = new System.Drawing.Point(435, 192), Size = new System.Drawing.Size(150, 22), PlaceholderText = "Agent Group Name" };
+            this.Controls.Add(txtAG);
+
+            Label lblCID = new Label { Text = "CID:", Location = new System.Drawing.Point(610, 195), Size = new System.Drawing.Size(30, 20) };
+            this.Controls.Add(lblCID);
+
+            txtCID = new TextBox { Location = new System.Drawing.Point(645, 192), Size = new System.Drawing.Size(215, 22), PlaceholderText = "CrowdStrike CID" };
+            this.Controls.Add(txtCID);
+
+            chkShowAll = new CheckBox { Text = "Show All Machines", Location = new System.Drawing.Point(120, 225), Size = new System.Drawing.Size(150, 20), Checked = true };
             this.Controls.Add(chkShowAll);
 
             btnStart = new Button
             {
                 Text = "Start Scan & Deploy",
-                Location = new System.Drawing.Point(120, 230),
+                Location = new System.Drawing.Point(300, 225),
                 Size = new System.Drawing.Size(150, 35),
                 BackColor = System.Drawing.Color.FromArgb(0, 120, 215),
                 ForeColor = System.Drawing.Color.White
@@ -113,7 +127,7 @@ namespace CrowdStrikeManager
             btnStop = new Button
             {
                 Text = "Stop",
-                Location = new System.Drawing.Point(280, 230),
+                Location = new System.Drawing.Point(460, 225),
                 Size = new System.Drawing.Size(80, 35),
                 BackColor = System.Drawing.Color.FromArgb(200, 50, 50),
                 ForeColor = System.Drawing.Color.White,
@@ -122,16 +136,16 @@ namespace CrowdStrikeManager
             btnStop.Click += BtnStop_Click;
             this.Controls.Add(btnStop);
 
-            progressBar = new ProgressBar { Location = new System.Drawing.Point(20, 280), Size = new System.Drawing.Size(840, 20) };
+            progressBar = new ProgressBar { Location = new System.Drawing.Point(20, 275), Size = new System.Drawing.Size(840, 20) };
             this.Controls.Add(progressBar);
 
-            lblProgress = new Label { Text = "", Location = new System.Drawing.Point(20, 305), Size = new System.Drawing.Size(840, 20) };
+            lblProgress = new Label { Text = "", Location = new System.Drawing.Point(20, 300), Size = new System.Drawing.Size(840, 20) };
             this.Controls.Add(lblProgress);
 
             dgvResults = new DataGridView
             {
-                Location = new System.Drawing.Point(20, 330),
-                Size = new System.Drawing.Size(840, 280),
+                Location = new System.Drawing.Point(20, 325),
+                Size = new System.Drawing.Size(840, 285),
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 ReadOnly = true,
                 MultiSelect = false,
@@ -154,11 +168,11 @@ namespace CrowdStrikeManager
             txtLog = new TextBox
             {
                 Location = new System.Drawing.Point(20, 645),
-                Size = new System.Drawing.Size(840, 30),
+                Size = new System.Drawing.Size(840, 35),
                 Multiline = true,
                 ScrollBars = ScrollBars.Vertical,
                 ReadOnly = true,
-                Height = 30
+                Height = 35
             };
             this.Controls.Add(txtLog);
         }
@@ -383,9 +397,8 @@ namespace CrowdStrikeManager
                 info.Status = "Not Installed";
                 info.Action = "Installing CrowdStrike";
 
-                InstallCertificates(ip, user, pass);
                 InstallCrowdStrike(ip, user, pass);
-                info.Details = "CrowdStrike installed successfully";
+                info.Details = "CrowdStrike installed via PowerShell script";
             }
             else
             {
@@ -450,12 +463,37 @@ namespace CrowdStrikeManager
         {
             Log($"  Installing CrowdStrike on {ip}...");
 
-            string script = $@"
-                New-Item -ItemType Directory -Path C:\TempCS -Force | Out-Null
-                Copy-Item -Path '{psScriptPath}' -Destination 'C:\TempCS\falcon.ps1' -Force
-                & C:\TempCS\falcon.ps1
-                Write-Output 'CrowdStrike installation completed'
-            ";
+            string ag = txtAG.Text.Trim();
+            string cid = txtCID.Text.Trim();
+
+            string script;
+            
+            if (!string.IsNullOrEmpty(psScriptPath) && File.Exists(psScriptPath))
+            {
+                string scriptContent = File.ReadAllText(psScriptPath);
+                
+                script = $@"
+                    New-Item -ItemType Directory -Path C:\TempCS -Force | Out-Null
+                    Set-Content -Path C:\TempCS\falcon.ps1 -Value @'
+{scriptContent}
+'@
+                    if ('{ag}' -ne '') {{ 
+                        & C:\TempCS\falcon.ps1 -AG '{ag}' 
+                    }} elseif ('{cid}' -ne '') {{
+                        & C:\TempCS\falcon.ps1 -CID '{cid}'
+                    }} else {{
+                        & C:\TempCS\falcon.ps1
+                    }}
+                    Write-Output 'CrowdStrike installation completed'
+                ";
+            }
+            else
+            {
+                script = $@"
+                    Write-Output 'PowerShell script not found at: {psScriptPath}'
+                ";
+            }
+            
             string result = RunPowerShellRemote(ip, user, pass, script);
             Log($"  Installation result: {result}");
         }

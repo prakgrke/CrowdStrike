@@ -356,6 +356,77 @@ namespace CrowdStrikeManager
         {
             MachineInfo info = new MachineInfo { IP = ip };
 
+            bool connected = false;
+            
+            // Try direct connection first
+            Log($"  Testing connection to {ip}...");
+            for (int attempt = 1; attempt <= 3; attempt++)
+            {
+                try
+                {
+                    string testResult = RunPowerShellRemote(ip, user, pass, "$env:COMPUTERNAME", 30000);
+                    if (!string.IsNullOrWhiteSpace(testResult) && !testResult.Contains("error") && !testResult.Contains("failed"))
+                    {
+                        connected = true;
+                        break;
+                    }
+                }
+                catch { }
+                
+                if (!connected && attempt < 3)
+                {
+                    Log($"  Attempt {attempt} failed, trying to enable WinRM via WMI...");
+                    EnableWinRMViaWMI(ip, user, pass);
+                    System.Threading.Thread.Sleep(5000);
+                }
+            }
+
+            if (!connected)
+            {
+                // Try WMI as last resort
+                Log($"  Trying WMI connection to {ip}...");
+                try
+                {
+                    string wmiResult = RunWMIDirect(ip, user, pass, "SELECT Name FROM Win32_ComputerSystem");
+                    if (!string.IsNullOrWhiteSpace(wmiResult) && !wmiResult.Contains("Access is denied"))
+                    {
+                        Log($"  WMI connected, enabling WinRM...");
+                        EnableWinRMViaWMI(ip, user, pass);
+                        System.Threading.Thread.Sleep(10000);
+                        
+                        // Try again after WMI WinRM enable
+                        for (int attempt = 1; attempt <= 3; attempt++)
+                        {
+                            try
+                            {
+                                string testResult = RunPowerShellRemote(ip, user, pass, "$env:COMPUTERNAME", 30000);
+                                if (!string.IsNullOrWhiteSpace(testResult) && !testResult.Contains("error"))
+                                {
+                                    connected = true;
+                                    break;
+                                }
+                            }
+                            catch { }
+                            System.Threading.Thread.Sleep(3000);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"  WMI also failed: {ex.Message}");
+                }
+            }
+
+            if (!connected)
+            {
+                Log($"  ERROR: Cannot connect to {ip} - WinRM not available");
+                info.Status = "Connection Failed";
+                info.Action = "Failed";
+                info.Details = "WinRM not enabled on target machine";
+                return info;
+            }
+
+            Log($"  Connected successfully!");
             Log($"  Getting system info from {ip}...");
             string hostname = RunPowerShellRemote(ip, user, pass, "$env:COMPUTERNAME");
             info.Hostname = hostname.Trim();
@@ -619,7 +690,7 @@ namespace CrowdStrikeManager
             }
         }
 
-        private string RunPowerShellRemote(string ip, string user, string pass, string command)
+        private string RunPowerShellRemote(string ip, string user, string pass, string command, int timeoutMs = 60000)
         {
             string script = $@"
                 $sec = ConvertTo-SecureString '{pass}' -AsPlainText -Force
@@ -646,7 +717,7 @@ namespace CrowdStrikeManager
             {
                 string output = process.StandardOutput.ReadToEnd();
                 string error = process.StandardError.ReadToEnd();
-                process.WaitForExit(60000);
+                process.WaitForExit(timeoutMs);
 
                 if (!string.IsNullOrWhiteSpace(error) && !error.Contains("WARNING"))
                 {
@@ -711,6 +782,67 @@ namespace CrowdStrikeManager
             {
                 txtLog.AppendText(DateTime.Now.ToString("HH:mm:ss") + " - " + message + Environment.NewLine);
             }));
+        }
+
+        private void EnableWinRMViaWMI(string ip, string user, string pass)
+        {
+            try
+            {
+                Log($"    Enabling WinRM via WMI on {ip}...");
+                
+                // Commands to enable WinRM via WMI
+                string[] commands = new string[] {
+                    "cmd /c winrm quickconfig -q",
+                    "cmd /c sc config WinRM start= auto",
+                    "cmd /c net start WinRM",
+                    "cmd /c netsh advfirewall firewall add rule name=\"WinRM-HTTP-In\" dir=in action=allow protocol=tcp localport=5985",
+                    "cmd /c netsh advfirewall firewall add rule name=\"WinRM-HTTPS-In\" dir=in action=allow protocol=tcp localport=5986"
+                };
+
+                foreach (var cmd in commands)
+                {
+                    try
+                    {
+                        RunWMIDirect(ip, user, pass, cmd);
+                    }
+                    catch { }
+                }
+                
+                Log($"    WinRM enable commands sent via WMI");
+            }
+            catch (Exception ex)
+            {
+                Log($"    WMI WinRM enable failed: {ex.Message}");
+            }
+        }
+
+        private string RunWMIDirect(string ip, string user, string pass, string command)
+        {
+            try
+            {
+                var connOptions = new System.Management.ConnectionOptions();
+                connOptions.Username = user;
+                connOptions.Password = pass;
+                connOptions.EnablePrivileges = true;
+
+                var scope = new System.Management.ManagementScope($"\\\\{ip}\\root\\cimv2", connOptions);
+                scope.Connect();
+
+                var query = new System.Management.ObjectQuery("SELECT Name FROM Win32_ComputerSystem");
+                var searcher = new System.Management.ManagementObjectSearcher(scope, query);
+                var results = searcher.Get();
+                
+                string output = "";
+                foreach (System.Management.ManagementObject mo in results)
+                {
+                    output = mo["Name"]?.ToString() ?? "";
+                }
+                return output;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("WMI failed: " + ex.Message);
+            }
         }
 
         private bool CompareVersions(string current, string target)
